@@ -1,0 +1,7 @@
+name: Feature request
+description: Propose an explainable, read-only inventory capability.
+body:
+  - {type: textarea, id: problem, attributes: {label: Problem and operator outcome}, validations: {required: true}}
+  - {type: textarea, id: evidence, attributes: {label: Sources, provenance, and identity implications}, validations: {required: true}}
+  - {type: textarea, id: security, attributes: {label: Data minimization and security impact}, validations: {required: true}}
+  - {type: textarea, id: alternatives, attributes: {label: Alternatives considered}}

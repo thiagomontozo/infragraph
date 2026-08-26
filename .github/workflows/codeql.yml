@@ -1,0 +1,21 @@
+name: CodeQL
+on:
+  push: {branches: [main]}
+  pull_request: {branches: [main]}
+  schedule: [{cron: '41 3 * * 1'}]
+permissions: {contents: read, security-events: write, packages: read}
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy: {fail-fast: false, matrix: {language: [go, javascript-typescript]}}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: github/codeql-action/init@v4
+        with: {languages: "${{ matrix.language }}", queries: security-extended}
+      - if: matrix.language == 'go'
+        run: go build ./cmd/infragraph-api ./cmd/infragraph-collector
+      - if: matrix.language == 'javascript-typescript'
+        run: cd web && npm ci && npm run build
+      - uses: github/codeql-action/analyze@v4
+

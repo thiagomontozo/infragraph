@@ -1,0 +1,25 @@
+name: Container Build
+on:
+  push: {branches: [main]}
+  workflow_dispatch:
+permissions: {contents: read, packages: write}
+jobs:
+  publish-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy: {fail-fast: false, matrix: {image: [api, collector, web]}}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: docker/build-push-action@v6
+        with:
+          context: "${{ matrix.image == 'web' && 'web' || '.' }}"
+          file: "${{ matrix.image == 'web' && 'web/Dockerfile' || format('Dockerfile.{0}', matrix.image) }}"
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:main"
+
