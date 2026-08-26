@@ -1,0 +1,18 @@
+name: infragraph-test
+services:
+  postgres:
+    image: postgres:17.6-alpine3.22
+    labels: {com.infragraph.managed: "true", com.infragraph.purpose: "test"}
+    environment: {POSTGRES_DB: infragraph_test, POSTGRES_USER: infragraph, POSTGRES_PASSWORD: test-only-password}
+    ports: ["55432:5432"]
+    healthcheck: {test: [CMD-SHELL, "pg_isready -U infragraph -d infragraph_test"], interval: 2s, timeout: 2s, retries: 30}
+    tmpfs: [/var/lib/postgresql/data]
+    deploy: {resources: {limits: {memory: 384M, cpus: "0.75"}}}
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    labels: {com.infragraph.managed: "true", com.infragraph.purpose: "test"}
+    command: server /data
+    environment: {MINIO_ROOT_USER: testaccess, MINIO_ROOT_PASSWORD: testsecret-change-me}
+    ports: ["59000:9000"]
+    tmpfs: [/data]
+    deploy: {resources: {limits: {memory: 256M, cpus: "0.5"}}}

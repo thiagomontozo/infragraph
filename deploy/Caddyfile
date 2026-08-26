@@ -1,0 +1,14 @@
+{$INFRAGRAPH_DOMAIN} {
+  encode zstd gzip
+  request_body { max_size 50MB }
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+    X-Frame-Options DENY
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
+  handle /api/* { reverse_proxy api:8080 }
+  handle /collector/* { reverse_proxy api:8080 { transport http { read_timeout 120s } } }
+  handle { reverse_proxy web:8080 }
+}
