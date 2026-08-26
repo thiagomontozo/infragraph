@@ -17,13 +17,20 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U infragraph -d infragraph_test"
           --health-interval 5s --health-timeout 3s --health-retries 20
-      minio:
-        image: minio/minio:RELEASE.2025-07-23T15-54-02Z
-        env: {MINIO_ROOT_USER: testaccess, MINIO_ROOT_PASSWORD: testsecret-change-me}
-        ports: [9000:9000]
-        options: --health-cmd "curl -f http://localhost:9000/minio/health/live" --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v6
+      - name: Start S3-compatible test storage
+        run: |
+          docker run -d --name infragraph-ci-minio \
+            --label com.infragraph.managed=true --label com.infragraph.purpose=test \
+            -e MINIO_ROOT_USER=testaccess -e MINIO_ROOT_PASSWORD=testsecret-change-me \
+            -p 9000:9000 minio/minio:RELEASE.2025-07-23T15-54-02Z server /data
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs infragraph-ci-minio
+          exit 1
       - uses: actions/setup-go@v6
         with: {go-version-file: go.mod, cache: true}
       - name: Format
@@ -37,6 +44,12 @@ jobs:
       - run: go build ./cmd/infragraph-api ./cmd/infragraph-collector ./cmd/infragraph-bootstrap
       - uses: actions/upload-artifact@v4
         with: {name: go-coverage, path: coverage.out, retention-days: 14}
+      - name: Stop S3-compatible test storage
+        if: always()
+        run: |
+          if docker container inspect infragraph-ci-minio >/dev/null 2>&1; then
+            docker rm -f infragraph-ci-minio
+          fi
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
