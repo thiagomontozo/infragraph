@@ -1,0 +1,4 @@
+import http from 'node:http';
+const now=new Date().toISOString();
+const asset={id:'asset-erp-api',canonicalName:'erp-api',displayName:'ERP API',assetType:'APPLICATION',status:'CONFLICTING',environment:'PRODUCTION',criticality:'HIGH',firstSeenAt:now,lastSeenAt:now};
+http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');let body={items:[]};if(req.url==='/api/v1/overview')body={assets:5,relationships:4,active:4,stale:0,missing:0,conflicts:1};else if(req.url?.startsWith('/api/v1/assets/asset-erp-api/dependencies'))body={nodes:['asset-erp-api','asset-postgresql'],relationships:[{id:'relationship-1',fromAssetId:'asset-erp-api',toAssetId:'asset-postgresql',type:'USES_DATABASE',status:'ACTIVE'}],depth:1};else if(req.url==='/api/v1/assets/asset-erp-api')body=asset;else if(req.url?.startsWith('/api/v1/assets'))body={items:[asset],limit:50,offset:0};res.end(JSON.stringify(body))}).listen(8080,'0.0.0.0');
