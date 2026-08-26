@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: InfraGraph API
+  version: 1.0.0-rc.1
+  description: Living infrastructure inventory and secure collector API.
+servers:
+  - url: https://inventory.example.com
+paths:
+  /health:
+    get: {summary: Process liveness, responses: {'200': {description: Alive}}}
+  /ready:
+    get: {summary: Essential dependency readiness, responses: {'200': {description: Ready}, '503': {$ref: '#/components/responses/Error'}}}
+  /api/v1/auth/login:
+    post:
+      summary: Create a server-side session
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Login'}}}}
+      responses: {'200': {description: Authenticated, headers: {Set-Cookie: {schema: {type: string}}}}, '401': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /api/v1/assets:
+    get:
+      summary: List organization assets
+      security: [{cookieAuth: []}]
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0}}
+      responses: {'200': {description: Page, content: {application/json: {schema: {$ref: '#/components/schemas/AssetPage'}}}}, '401': {$ref: '#/components/responses/Error'}}
+  /api/v1/assets/{assetId}:
+    get:
+      summary: Get Asset 360 overview
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: '#/components/parameters/AssetId'}]
+      responses: {'200': {description: Asset, content: {application/json: {schema: {$ref: '#/components/schemas/Asset'}}}}, '404': {$ref: '#/components/responses/Error'}}
+  /api/v1/assets/{assetId}/dependencies:
+    get:
+      summary: Bounded dependency traversal
+      security: [{cookieAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/AssetId'}
+        - {name: maxDepth, in: query, schema: {type: integer, minimum: 1, maximum: 6, default: 3}}
+        - {name: maxNodes, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses: {'200': {description: Bounded subgraph}, '422': {$ref: '#/components/responses/Error'}}
+  /api/v1/imports/csv/preview:
+    post:
+      summary: Validate CSV without applying it
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: '#/components/parameters/CSRF'}]
+      requestBody: {required: true, content: {text/csv: {schema: {type: string, format: binary}}}}
+      responses: {'200': {description: Preview}, '422': {$ref: '#/components/responses/Error'}}
+  /collector/v1/enroll:
+    post:
+      summary: Consume a single-use collector enrollment token
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Enrollment'}}}}
+      responses: {'201': {description: Enrolled}, '401': {$ref: '#/components/responses/Error'}}
+  /collector/v1/heartbeat:
+    post:
+      summary: Update collector health and compatibility
+      security: [{collectorAuth: []}]
+      responses: {'200': {description: Accepted}, '401': {$ref: '#/components/responses/Error'}}
+  /collector/v1/snapshots:
+    post:
+      summary: Verify and stage a signed snapshot
+      security: [{collectorAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, description: See contracts/collector/v1/inventory-snapshot.schema.json}}}}
+      responses: {'202': {description: Staged}, '401': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '413': {$ref: '#/components/responses/Error'}}
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: infragraph_session}
+    collectorAuth: {type: http, scheme: bearer}
+  parameters:
+    AssetId: {name: assetId, in: path, required: true, schema: {type: string, maxLength: 160}}
+    CSRF: {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+  responses:
+    Error: {description: Structured error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  schemas:
+    Error: {type: object, required: [error], properties: {error: {type: object, required: [code, message, requestId], properties: {code: {type: string}, message: {type: string}, requestId: {type: string}}}}}
+    Login: {type: object, additionalProperties: false, required: [email, password], properties: {email: {type: string, format: email}, password: {type: string, minLength: 12}, totp: {type: string, pattern: '^[0-9]{6}$'}, recoveryCode: {type: string, minLength: 8, maxLength: 128}}}
+    Enrollment: {type: object, additionalProperties: false, required: [token, name, publicKey, collectorVersion, protocolVersion], properties: {token: {type: string}, name: {type: string}, publicKey: {type: string, contentEncoding: base64}, collectorVersion: {type: string}, protocolVersion: {const: '1.0'}}}
+    Asset: {type: object, required: [id, canonicalName, displayName, assetType, status], properties: {id: {type: string}, canonicalName: {type: string}, displayName: {type: string}, assetType: {type: string}, status: {enum: [ACTIVE, STALE, MISSING, CONFLICTING, RETIRED, UNKNOWN]}, environment: {type: string}, criticality: {type: string}, firstSeenAt: {type: string, format: date-time}, lastSeenAt: {type: string, format: date-time}}}
+    AssetPage: {type: object, required: [items, limit, offset], properties: {items: {type: array, items: {$ref: '#/components/schemas/Asset'}}, limit: {type: integer}, offset: {type: integer}}}
