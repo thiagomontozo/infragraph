@@ -1,0 +1,14 @@
+.git
+.github
+.env*
+tmp
+data
+web/node_modules
+web/dist
+coverage
+test-results
+playwright-report
+test-artifacts
+*.key
+*.pem
+*.p12

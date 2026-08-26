@@ -1,0 +1,2 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["error"],"properties":{"error":{"type":"object","additionalProperties":false,"required":["code","message","requestId"],"properties":{"code":{"type":"string","maxLength":80},"message":{"type":"string","maxLength":2000},"requestId":{"type":"string","maxLength":160},"retryable":{"type":"boolean"}}}}}
+
