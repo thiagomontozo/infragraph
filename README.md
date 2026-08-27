@@ -91,7 +91,7 @@ docker compose up --build
 Bootstrap an owner explicitly after PostgreSQL is ready:
 
 ```bash
-go run ./cmd/infragraph-bootstrap -database-url "$INFRAGRAPH_DATABASE_URL" -organization "Example" -name "Owner" -email "owner@example.test" -password "$BOOTSTRAP_PASSWORD"
+go run ./cmd/infragraph-bootstrap -database-url "$INFRAGRAPH_DATABASE_URL" -organization "Example" -name "Owner" -email "owner@example.test" -password "$BOOTSTRAP_PASSWORD" -create-collector-token
 ```
 
 Open `http://localhost:5173`. For tests use `scripts/test.ps1`, `scripts/integration.ps1`, and `scripts/e2e.ps1` on Windows or their `.sh` equivalents on Linux.
@@ -110,7 +110,7 @@ The suite covers domain invariants, graph bounds/cycles, signatures, reconciliat
 
 ## Current status
 
-**Production Candidate — 1.0.0-rc.1.** Production Ready is declared only after every release gate in [release process](docs/release-process.md) passes locally and remotely. Current measured limitations are documented rather than hidden.
+**Production Candidate — 1.0.0-rc.1.** Production Ready is declared only after every item in the [53-gate production-readiness matrix](docs/production-readiness.md) has recorded evidence. The current blockers and supported single-API topology are documented explicitly rather than hidden.
 
 ## Limitations and roadmap
 

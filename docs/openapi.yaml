@@ -61,7 +61,7 @@ paths:
       summary: Verify and stage a signed snapshot
       security: [{collectorAuth: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, description: See contracts/collector/v1/inventory-snapshot.schema.json}}}}
-      responses: {'202': {description: Staged}, '401': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '413': {$ref: '#/components/responses/Error'}}
+      responses: {'202': {description: Reconciled or idempotently acknowledged}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '413': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}}
 components:
   securitySchemes:
     cookieAuth: {type: apiKey, in: cookie, name: infragraph_session}
@@ -74,6 +74,6 @@ components:
   schemas:
     Error: {type: object, required: [error], properties: {error: {type: object, required: [code, message, requestId], properties: {code: {type: string}, message: {type: string}, requestId: {type: string}}}}}
     Login: {type: object, additionalProperties: false, required: [email, password], properties: {email: {type: string, format: email}, password: {type: string, minLength: 12}, totp: {type: string, pattern: '^[0-9]{6}$'}, recoveryCode: {type: string, minLength: 8, maxLength: 128}}}
-    Enrollment: {type: object, additionalProperties: false, required: [token, name, publicKey, collectorVersion, protocolVersion], properties: {token: {type: string}, name: {type: string}, publicKey: {type: string, contentEncoding: base64}, collectorVersion: {type: string}, protocolVersion: {const: '1.0'}}}
+    Enrollment: {type: object, additionalProperties: false, required: [token, name, publicKey, collectorVersion, protocolVersion], properties: {token: {type: string}, name: {type: string}, publicKey: {type: string, contentEncoding: base64}, collectorVersion: {type: string}, protocolVersion: {const: '1.0'}, connectorName: {type: string}, connectorType: {enum: [DOCKER, KUBERNETES]}}}
     Asset: {type: object, required: [id, canonicalName, displayName, assetType, status], properties: {id: {type: string}, canonicalName: {type: string}, displayName: {type: string}, assetType: {type: string}, status: {enum: [ACTIVE, STALE, MISSING, CONFLICTING, RETIRED, UNKNOWN]}, environment: {type: string}, criticality: {type: string}, firstSeenAt: {type: string, format: date-time}, lastSeenAt: {type: string, format: date-time}}}
     AssetPage: {type: object, required: [items, limit, offset], properties: {items: {type: array, items: {$ref: '#/components/schemas/Asset'}}, limit: {type: integer}, offset: {type: integer}}}

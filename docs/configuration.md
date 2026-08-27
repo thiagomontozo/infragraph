@@ -22,3 +22,7 @@
 | `INFRAGRAPH_OTEL_ENABLED/ENDPOINT` | Endpoint may be sensitive | `false`/empty | TLS endpoint; no secrets in attributes. |
 | `INFRAGRAPH_DEBUG` | No | `false` | Must remain false. |
 
+Production validation also requires PostgreSQL TLS (`sslmode` must not be `disable`), complete TLS-enabled S3 settings, a non-zero random master key, safe reconciliation concurrency (1–64), and syntactically valid trusted proxy CIDRs. `INFRAGRAPH_TRUSTED_PROXY_CIDRS` is a comma-separated allowlist; forwarded client addresses are ignored unless the direct peer belongs to it.
+
+Collector-only variables include `INFRAGRAPH_CONTROL_PLANE_URL`, the one-use `INFRAGRAPH_ENROLLMENT_TOKEN`, `INFRAGRAPH_COLLECTOR_DATA_DIR`, `INFRAGRAPH_COLLECTOR_NAME`, `INFRAGRAPH_CONNECTOR_NAME`, `INFRAGRAPH_DOCKER_SOCKET`, `INFRAGRAPH_DOCKER_LABEL_SCOPE`, `INFRAGRAPH_COLLECTOR_INTERVAL`, `INFRAGRAPH_COLLECTOR_MAX_SPOOL_BYTES`, and `INFRAGRAPH_COLLECTOR_MAX_SPOOL_AGE`.
+
