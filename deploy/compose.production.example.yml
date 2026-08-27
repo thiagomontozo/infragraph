@@ -1,7 +1,7 @@
 name: infragraph
 services:
   api:
-    image: ghcr.io/thiagomontozo/infragraph-api:1.0.0-rc.1
+    image: ${INFRAGRAPH_API_IMAGE:?set an immutable image digest}
     restart: unless-stopped
     env_file: [.env.production]
     expose: [8080]
@@ -9,14 +9,16 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    networks: [backend]
   web:
-    image: ghcr.io/thiagomontozo/infragraph-web:1.0.0-rc.1
+    image: ${INFRAGRAPH_WEB_IMAGE:?set an immutable image digest}
     restart: unless-stopped
     expose: [8080]
     read_only: true
     tmpfs: [/tmp, /var/cache/nginx, /var/run]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    networks: [backend]
   caddy:
     image: caddy:2.10.2-alpine
     restart: unless-stopped
@@ -26,4 +28,8 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
+    networks: [backend]
 volumes: {caddy_data: {}, caddy_config: {}}
+networks:
+  backend:
+    ipam: {config: [{subnet: 172.30.0.0/24}]}

@@ -14,7 +14,12 @@ jobs:
     strategy: {fail-fast: true, matrix: {image: [api, collector, web]}}
     steps:
       - uses: actions/checkout@v6
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 0, ref: "${{ inputs.tag || github.ref_name }}"}
+      - name: Validate release tag and version
+        env: {RELEASE_TAG: "${{ inputs.tag || github.ref_name }}"}
+        run: |
+          case "$RELEASE_TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "invalid release tag: $RELEASE_TAG" >&2; exit 1;; esac
+          test "v$(cat VERSION)" = "$RELEASE_TAG"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
@@ -27,7 +32,7 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:${{ github.ref_name }}"
+          tags: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:${{ inputs.tag || github.ref_name }}"
       - uses: sigstore/cosign-installer@v4.1.2
       - name: Keyless sign
         env: {DIGEST: "${{ steps.build.outputs.digest }}", IMAGE: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}"}
@@ -39,5 +44,5 @@ jobs:
       - name: Checksums
         run: sha256sum "infragraph-${{ matrix.image }}.spdx.json" > "infragraph-${{ matrix.image }}.checksums.txt"
       - uses: softprops/action-gh-release@v2
-        with: {generate_release_notes: true, files: "infragraph-${{ matrix.image }}.*"}
+        with: {tag_name: "${{ inputs.tag || github.ref_name }}", generate_release_notes: true, files: "infragraph-${{ matrix.image }}.*"}
 

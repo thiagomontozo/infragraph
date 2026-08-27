@@ -21,5 +21,7 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:main"
+          tags: |
+            ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:main
+            ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}:sha-${{ github.sha }}
 

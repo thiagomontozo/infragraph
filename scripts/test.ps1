@@ -1,7 +1,18 @@
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
+$frontendImage = "infragraph-frontend-test:$PID"
 try {
-  gofmt -w ./cmd ./internal
+	$unformatted = @(gofmt -l ./cmd ./internal)
+	if ($unformatted.Count -gt 0) { throw "Go files require gofmt: $($unformatted -join ', ')" }
   go test ./cmd/... ./internal/...
-  docker run --rm --label com.infragraph.managed=true --label com.infragraph.purpose=test -v "${PWD}/web:/app" -w /app node:22.19.0-alpine3.22 sh -lc 'npm ci && npm run lint && npm run typecheck && npm run test:unit && npm run build'
-} finally { Pop-Location }
+	$buildArgs = @('build', '--target', 'test', '-f', 'web/Dockerfile', '-t', $frontendImage)
+  if ($env:INFRAGRAPH_NPM_CA_FILE) {
+		$buildArgs += @('--secret', "id=npm_ca,src=$($env:INFRAGRAPH_NPM_CA_FILE)")
+  }
+	$buildArgs += 'web'
+	docker @buildArgs
+	if ($LASTEXITCODE -ne 0) { throw "frontend test image build failed" }
+} finally {
+	docker image rm -f $frontendImage 2>$null | Out-Null
+  Pop-Location
+}

@@ -42,6 +42,15 @@ jobs:
           INFRAGRAPH_TEST_S3_ENDPOINT: localhost:9000
       - run: go test -race -count=1 ./internal/security ./internal/reconcile ./internal/graph ./internal/resolution ./internal/imports
       - run: go build ./cmd/infragraph-api ./cmd/infragraph-collector ./cmd/infragraph-bootstrap
+      - name: Validate contracts and deployment manifests
+        shell: bash
+        run: |
+          find contracts -name '*.json' -print0 | xargs -0 -n1 jq empty
+          ruby -e "require 'yaml'; YAML.safe_load_file('docs/openapi.yaml', aliases: true)"
+          touch deploy/.env.production
+          INFRAGRAPH_API_IMAGE=ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+          INFRAGRAPH_WEB_IMAGE=ghcr.io/example/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            docker compose -f deploy/compose.production.example.yml config --quiet
       - uses: actions/upload-artifact@v4
         with: {name: go-coverage, path: coverage.out, retention-days: 14}
       - name: Stop S3-compatible test storage
