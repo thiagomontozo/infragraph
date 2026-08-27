@@ -24,8 +24,9 @@ type Result struct {
 var strongKeys = []string{"cloud_id", "kubernetes_uid", "docker_container_id", "vm_uuid", "hardware_uuid", "terraform_resource_id", "external_cmdb_id"}
 
 func Resolve(observation domain.Observation, assets []domain.Asset, identities map[string]string) Result {
+	strong := StrongIdentities(observation)
 	for _, k := range strongKeys {
-		v := strings.TrimSpace(fmt.Sprint(observation.IdentityHints[k]))
+		v := strong[k]
 		if v == "" {
 			continue
 		}
@@ -44,4 +45,15 @@ func Resolve(observation domain.Observation, assets []domain.Asset, identities m
 		return Result{Candidate, a.ID, "LOW", []string{"hostname is a weak identifier"}}
 	}
 	return Result{Decision: NewAsset, Confidence: "UNKNOWN", Reasons: []string{"no known identity matched"}}
+}
+
+func StrongIdentities(observation domain.Observation) map[string]string {
+	identities := map[string]string{}
+	for _, key := range strongKeys {
+		value := strings.TrimSpace(fmt.Sprint(observation.IdentityHints[key]))
+		if value != "" && value != "<nil>" {
+			identities[key] = value
+		}
+	}
+	return identities
 }

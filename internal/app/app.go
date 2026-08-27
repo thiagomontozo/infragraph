@@ -11,8 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,12 +23,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/thiagomontozo/infragraph/internal/audit"
 	"github.com/thiagomontozo/infragraph/internal/config"
 	"github.com/thiagomontozo/infragraph/internal/database"
 	"github.com/thiagomontozo/infragraph/internal/domain"
 	"github.com/thiagomontozo/infragraph/internal/graph"
 	"github.com/thiagomontozo/infragraph/internal/imports"
+	"github.com/thiagomontozo/infragraph/internal/reconcile"
 	"github.com/thiagomontozo/infragraph/internal/security"
+	"github.com/thiagomontozo/infragraph/internal/storage"
 )
 
 type contextKey string
@@ -54,10 +60,37 @@ type window struct {
 	count int
 }
 
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
+}
+
 func (l *limiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	if len(l.windows) > 10000 {
+		for candidate, value := range l.windows {
+			if now.Sub(value.start) > 2*l.period {
+				delete(l.windows, candidate)
+			}
+		}
+	}
 	w := l.windows[key]
 	if now.Sub(w.start) > l.period {
 		w = window{start: now}
@@ -74,14 +107,18 @@ type App struct {
 	started                      time.Time
 	metrics                      metrics
 	authLimiter, snapshotLimiter *limiter
-	graph                        *graph.Service
+	objects                      storage.ObjectStorage
 }
 
-func New(cfg config.Config, db *database.DB, logger *slog.Logger) *App {
+func New(cfg config.Config, db *database.DB, logger *slog.Logger, objectStorage ...storage.ObjectStorage) *App {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &App{cfg: cfg, db: db, log: logger, started: time.Now(), authLimiter: &limiter{windows: map[string]window{}, limit: 10, period: time.Minute}, snapshotLimiter: &limiter{windows: map[string]window{}, limit: 30, period: time.Minute}, graph: graph.New(graph.Limits{MaxDepth: cfg.MaxGraphDepth, MaxNodes: cfg.MaxGraphNodes, Timeout: 2 * time.Second})}
+	application := &App{cfg: cfg, db: db, log: logger, started: time.Now(), authLimiter: &limiter{windows: map[string]window{}, limit: 10, period: time.Minute}, snapshotLimiter: &limiter{windows: map[string]window{}, limit: 30, period: time.Minute}}
+	if len(objectStorage) > 0 {
+		application.objects = objectStorage[0]
+	}
+	return application
 }
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -131,7 +168,11 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			return
 		}
 		a.metrics.requests.Add(1)
-		next.ServeHTTP(w, r)
+		response := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(response, r)
+		if response.status >= http.StatusBadRequest {
+			a.metrics.failures.Add(1)
+		}
 		a.log.Info("http_request", "requestId", rid, "method", r.Method, "path", r.URL.Path, "durationMs", time.Since(start).Milliseconds())
 	})
 }
@@ -152,6 +193,12 @@ func (a *App) ready(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "not_ready", "essential dependency unavailable", requestID(r))
 		return
 	}
+	if a.objects != nil {
+		if e := a.objects.Ready(ctx); e != nil {
+			writeError(w, 503, "not_ready", "essential dependency unavailable", requestID(r))
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]any{"status": "ready"})
 }
 func (a *App) prometheus(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +207,7 @@ func (a *App) prometheus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	if !a.authLimiter.allow(r.RemoteAddr) {
+	if !a.authLimiter.allow(a.clientIP(r)) {
 		writeError(w, 429, "rate_limited", "too many authentication attempts", requestID(r))
 		return
 	}
@@ -189,7 +236,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	token, _ := security.RandomToken(32)
 	csrf, _ := security.RandomToken(32)
 	expires := time.Now().Add(12 * time.Hour)
-	_, e = a.db.Pool.Exec(r.Context(), "INSERT INTO sessions(id_hash,user_id,organization_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)", security.TokenHash(token), userID, orgID, security.TokenHash(csrf), expires)
+	_, e = a.db.Pool.Exec(r.Context(), "INSERT INTO sessions(id_hash,user_id,organization_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)", security.KeyedTokenHash(a.cfg.SessionSecret, token), userID, orgID, security.KeyedTokenHash(a.cfg.SessionSecret, csrf), expires)
 	if e != nil {
 		writeError(w, 500, "internal_error", "could not create session", requestID(r))
 		return
@@ -238,7 +285,7 @@ func (a *App) session(next http.Handler) http.Handler {
 			return
 		}
 		p := principal{Permissions: map[string]bool{}}
-		e = a.db.Pool.QueryRow(r.Context(), "SELECT s.user_id,s.organization_id,s.csrf_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active", security.TokenHash(cookie.Value)).Scan(&p.UserID, &p.OrganizationID, &p.CSRFHash)
+		e = a.db.Pool.QueryRow(r.Context(), "SELECT s.user_id,s.organization_id,s.csrf_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active", security.KeyedTokenHash(a.cfg.SessionSecret, cookie.Value)).Scan(&p.UserID, &p.OrganizationID, &p.CSRFHash)
 		if e != nil {
 			writeError(w, 401, "unauthenticated", "session invalid or expired", requestID(r))
 			return
@@ -255,7 +302,7 @@ func (a *App) session(next http.Handler) http.Handler {
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			csrf := r.Header.Get("X-CSRF-Token")
-			if subtle.ConstantTimeCompare([]byte(security.TokenHash(csrf)), []byte(p.CSRFHash)) != 1 {
+			if subtle.ConstantTimeCompare([]byte(security.KeyedTokenHash(a.cfg.SessionSecret, csrf)), []byte(p.CSRFHash)) != 1 {
 				writeError(w, 403, "csrf_invalid", "CSRF token is missing or invalid", requestID(r))
 				return
 			}
@@ -281,7 +328,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && route == "auth/logout":
 		p := principalFrom(r)
 		c, _ := r.Cookie("infragraph_session")
-		a.db.Pool.Exec(r.Context(), "UPDATE sessions SET revoked_at=now() WHERE id_hash=$1 AND organization_id=$2", security.TokenHash(c.Value), p.OrganizationID)
+		a.db.Pool.Exec(r.Context(), "UPDATE sessions SET revoked_at=now() WHERE id_hash=$1 AND organization_id=$2", security.KeyedTokenHash(a.cfg.SessionSecret, c.Value), p.OrganizationID)
 		http.SetCookie(w, &http.Cookie{Name: "infragraph_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
 		w.WriteHeader(204)
 	case r.Method == "GET" && route == "asset-types":
@@ -299,13 +346,21 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && route == "imports/terraform/preview":
 		a.terraformPreview(w, r)
 	case r.Method == "GET" && route == "changes":
-		a.genericList(w, r, "infrastructure_changes", "change_type,summary,detected_at", "detected_at")
+		if require(w, r, "asset.read") {
+			a.genericList(w, r, "infrastructure_changes", "change_type,summary,detected_at", "detected_at")
+		}
 	case r.Method == "GET" && route == "findings":
-		a.genericList(w, r, "infrastructure_findings", "finding_type,status,priority,explanation,created_at", "created_at")
+		if require(w, r, "finding.read") {
+			a.genericList(w, r, "infrastructure_findings", "finding_type,status,priority,explanation,created_at", "created_at")
+		}
 	case r.Method == "GET" && route == "connectors":
-		a.genericList(w, r, "infrastructure_connectors", "name,type,enabled,authoritative_level,last_status,last_successful_sync_at", "created_at")
+		if require(w, r, "connector.read") {
+			a.genericList(w, r, "infrastructure_connectors", "name,type,enabled,authoritative_level,last_status,last_successful_sync_at", "created_at")
+		}
 	case r.Method == "GET" && route == "collectors":
-		a.genericList(w, r, "collectors", "name,status,collector_version,protocol_version,compatibility_status,last_heartbeat_at,fingerprint", "enrolled_at")
+		if require(w, r, "collector.read") {
+			a.genericList(w, r, "collectors", "name,status,collector_version,protocol_version,compatibility_status,last_heartbeat_at,fingerprint", "enrolled_at")
+		}
 	case r.Method == "GET" && route == "audit":
 		if require(w, r, "audit.read") {
 			a.genericList(w, r, "audit_events", "action,resource_type,resource_id,request_id,occurred_at,event_hash", "occurred_at")
@@ -378,28 +433,22 @@ func (a *App) assetRoute(w http.ResponseWriter, r *http.Request, route string) {
 		return
 	}
 	kind := parts[2]
+	if len(parts) != 3 || (kind != "dependencies" && kind != "dependents" && kind != "impact" && kind != "relationships") {
+		writeError(w, 404, "not_found", "asset subresource not found", requestID(r))
+		return
+	}
 	reverse := kind == "dependents" || kind == "impact"
 	depth := boundedInt(r.URL.Query().Get("maxDepth"), 3, 1, a.cfg.MaxGraphDepth)
 	nodes := boundedInt(r.URL.Query().Get("maxNodes"), 100, 1, a.cfg.MaxGraphNodes)
-	rows, e := a.db.Pool.Query(r.Context(), "SELECT id,from_asset_id,to_asset_id,type,status,first_seen_at,last_seen_at,created_at,updated_at FROM asset_relationships WHERE organization_id=$1", org)
-	if e != nil {
-		writeError(w, 500, "query_failed", "could not load graph", requestID(r))
-		return
-	}
-	defer rows.Close()
-	var edges []domain.Relationship
-	for rows.Next() {
-		var edge domain.Relationship
-		edge.OrganizationID = org
-		if rows.Scan(&edge.ID, &edge.FromAssetID, &edge.ToAssetID, &edge.Type, &edge.Status, &edge.FirstSeenAt, &edge.LastSeenAt, &edge.CreatedAt, &edge.UpdatedAt) == nil {
-			edges = append(edges, edge)
-		}
-	}
-	result, e := a.graph.Traverse(r.Context(), org, id, depth, nodes, reverse, edges)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	result, e := graph.TraversePostgres(ctx, a.db.Pool, org, id, depth, nodes, reverse)
 	if e != nil {
 		if errors.Is(e, graph.ErrLimitExceeded) {
 			a.metrics.graphRejections.Add(1)
 			writeError(w, 422, "graph_limit_exceeded", e.Error(), requestID(r))
+		} else if errors.Is(e, pgx.ErrNoRows) {
+			writeError(w, 404, "not_found", "asset not found", requestID(r))
 		} else {
 			writeError(w, 500, "graph_failed", "graph query failed", requestID(r))
 		}
@@ -424,6 +473,10 @@ func (a *App) genericList(w http.ResponseWriter, r *http.Request, table, columns
 		if rows.Scan(&v) == nil {
 			items = append(items, v)
 		}
+	}
+	if e = rows.Err(); e != nil {
+		writeError(w, 500, "query_failed", "could not load records", requestID(r))
+		return
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
 }
@@ -466,11 +519,14 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "database_unavailable", "enrollment unavailable", requestID(r))
 		return
 	}
-	if !a.authLimiter.allow(r.RemoteAddr) {
+	if !a.authLimiter.allow(a.clientIP(r)) {
 		writeError(w, 429, "rate_limited", "too many enrollment attempts", requestID(r))
 		return
 	}
-	var in struct{ Token, Name, PublicKey, CollectorVersion, ProtocolVersion string }
+	var in struct {
+		Token, Name, PublicKey, CollectorVersion, ProtocolVersion string
+		ConnectorName, ConnectorType                              string
+	}
 	if e := decode(w, r, &in, 64<<10); e != nil {
 		return
 	}
@@ -493,6 +549,7 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	finger := sha256.Sum256(raw)
 	collectorID := newID("collector")
+	connectorID := newID("connector")
 	credential, _ := security.RandomToken(32)
 	compat := "COMPATIBLE"
 	if !strings.HasPrefix(in.ProtocolVersion, "1.") {
@@ -502,11 +559,30 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 	if e == nil {
 		_, e = tx.Exec(r.Context(), "INSERT INTO collector_credentials(id,organization_id,collector_id,credential_hash) VALUES($1,$2,$3,$4)", newID("credential"), org, collectorID, security.TokenHash(credential))
 	}
-	if e != nil || tx.Commit(r.Context()) != nil {
+	connectorType := strings.ToUpper(strings.TrimSpace(in.ConnectorType))
+	if connectorType == "" {
+		connectorType = "DOCKER"
+	}
+	if connectorType != "DOCKER" && connectorType != "KUBERNETES" {
+		writeError(w, 422, "invalid_connector_type", "connector type must be DOCKER or KUBERNETES", requestID(r))
+		return
+	}
+	connectorName := strings.TrimSpace(in.ConnectorName)
+	if connectorName == "" {
+		connectorName = in.Name + " " + strings.ToLower(connectorType)
+	}
+	if e == nil {
+		_, e = tx.Exec(r.Context(), "INSERT INTO infrastructure_connectors(id,organization_id,collector_id,name,type,enabled,authoritative_level,last_status) VALUES($1,$2,$3,$4,$5,true,'OBSERVED','ENROLLED')", connectorID, org, collectorID, connectorName, connectorType)
+	}
+	if e != nil {
 		writeError(w, 500, "internal_error", "enrollment failed", requestID(r))
 		return
 	}
-	writeJSON(w, 201, map[string]any{"collectorId": collectorID, "organizationId": org, "credential": credential, "compatibilityStatus": compat})
+	if e = tx.Commit(r.Context()); e != nil {
+		writeError(w, 500, "internal_error", "enrollment failed", requestID(r))
+		return
+	}
+	writeJSON(w, 201, map[string]any{"collectorId": collectorID, "connectorId": connectorID, "organizationId": org, "credential": credential, "compatibilityStatus": compat})
 }
 func (a *App) collectorPrincipal(r *http.Request) (string, string, ed25519.PublicKey, bool) {
 	auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -538,7 +614,12 @@ func (a *App) collectorHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(in.ProtocolVersion, "1.") {
 		compat = "INCOMPATIBLE"
 	}
-	_, e := a.db.Pool.Exec(r.Context(), "UPDATE collectors SET collector_version=$1,protocol_version=$2,os=$3,architecture=$4,capabilities=$5,compatibility_status=$6,last_heartbeat_at=now() WHERE id=$7 AND organization_id=$8", in.CollectorVersion, in.ProtocolVersion, in.OS, in.Architecture, in.Capabilities, compat, id, org)
+	capabilities, e := json.Marshal(in.Capabilities)
+	if e != nil {
+		writeError(w, 422, "invalid_capabilities", "collector capabilities are invalid", requestID(r))
+		return
+	}
+	_, e = a.db.Pool.Exec(r.Context(), "UPDATE collectors SET collector_version=$1,protocol_version=$2,os=$3,architecture=$4,capabilities=$5,compatibility_status=$6,last_heartbeat_at=now() WHERE id=$7 AND organization_id=$8", in.CollectorVersion, in.ProtocolVersion, in.OS, in.Architecture, capabilities, compat, id, org)
 	if e != nil {
 		writeError(w, 500, "internal_error", "heartbeat update failed", requestID(r))
 		return
@@ -563,6 +644,10 @@ func (a *App) collectorSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "collector_binding_mismatch", "snapshot identity does not match credential", requestID(r))
 		return
 	}
+	if !validSnapshotContract(s) {
+		writeError(w, 422, "snapshot_contract_invalid", "snapshot does not satisfy protocol limits", requestID(r))
+		return
+	}
 	if time.Since(s.CompletedAt) > 24*time.Hour || s.CompletedAt.After(time.Now().Add(5*time.Minute)) {
 		writeError(w, 409, "snapshot_timestamp_invalid", "snapshot timestamp outside replay window", requestID(r))
 		return
@@ -572,18 +657,104 @@ func (a *App) collectorSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "invalid_snapshot_signature", e.Error(), requestID(r))
 		return
 	}
+	var connectorCollector, connectorType string
+	var enabled bool
+	e := a.db.Pool.QueryRow(r.Context(), "SELECT coalesce(collector_id,''),enabled,type FROM infrastructure_connectors WHERE id=$1 AND organization_id=$2", s.ConnectorID, org).Scan(&connectorCollector, &enabled, &connectorType)
+	if e != nil || connectorCollector != id || !enabled || !strings.EqualFold(connectorType, s.ConnectorType) {
+		writeError(w, 403, "connector_binding_mismatch", "connector is not enabled and bound to this collector", requestID(r))
+		return
+	}
+	tx, e := a.db.Pool.Begin(r.Context())
+	if e != nil {
+		writeError(w, 500, "internal_error", "snapshot transaction could not start", requestID(r))
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, e = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", org+"|"+s.ConnectorID); e != nil {
+		writeError(w, 500, "internal_error", "snapshot lock could not be acquired", requestID(r))
+		return
+	}
+	var existingHash, existingStatus string
+	e = tx.QueryRow(r.Context(), "SELECT content_hash,status FROM source_snapshots WHERE id=$1 AND organization_id=$2", s.SnapshotID, org).Scan(&existingHash, &existingStatus)
+	if e == nil {
+		if subtle.ConstantTimeCompare([]byte(existingHash), []byte(s.ContentHash)) != 1 {
+			writeError(w, 409, "snapshot_identity_conflict", "snapshot ID was reused with different content", requestID(r))
+			return
+		}
+		writeJSON(w, 202, map[string]any{"snapshotId": s.SnapshotID, "status": existingStatus, "idempotent": true})
+		return
+	}
+	if !errors.Is(e, pgx.ErrNoRows) {
+		writeError(w, 500, "internal_error", "snapshot history could not be checked", requestID(r))
+		return
+	}
 	var maxSequence int64
-	a.db.Pool.QueryRow(r.Context(), "SELECT coalesce(max(sequence),0) FROM source_snapshots WHERE organization_id=$1 AND collector_id=$2", org, id).Scan(&maxSequence)
+	if e = tx.QueryRow(r.Context(), "SELECT coalesce(max(sequence),0) FROM source_snapshots WHERE organization_id=$1 AND connector_id=$2", org, s.ConnectorID).Scan(&maxSequence); e != nil {
+		writeError(w, 500, "internal_error", "snapshot sequence could not be checked", requestID(r))
+		return
+	}
 	if s.Sequence <= maxSequence {
 		writeError(w, 409, "snapshot_replay", "snapshot sequence was already observed", requestID(r))
 		return
 	}
-	_, e := a.db.Pool.Exec(r.Context(), "INSERT INTO source_snapshots(id,organization_id,connector_id,collector_id,status,sequence,started_at,completed_at,asset_count,relationship_count,content_hash,protocol_version) VALUES($1,$2,$3,$4,'QUEUED',$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING", s.SnapshotID, org, s.ConnectorID, id, s.Sequence, s.StartedAt, s.CompletedAt, len(s.Assets), len(s.Relationships), s.ContentHash, s.ProtocolVersion)
+	_, e = tx.Exec(r.Context(), "INSERT INTO source_snapshots(id,organization_id,connector_id,collector_id,status,sequence,started_at,completed_at,asset_count,relationship_count,content_hash,protocol_version) VALUES($1,$2,$3,$4,'RUNNING',$5,$6,$7,$8,$9,$10,$11)", s.SnapshotID, org, s.ConnectorID, id, s.Sequence, s.StartedAt, s.CompletedAt, len(s.Assets), len(s.Relationships), s.ContentHash, s.ProtocolVersion)
 	if e != nil {
 		writeError(w, 422, "snapshot_rejected", "snapshot could not be staged", requestID(r))
 		return
 	}
-	writeJSON(w, 202, map[string]any{"snapshotId": s.SnapshotID, "status": "QUEUED"})
+	missingThreshold := 2
+	_ = tx.QueryRow(r.Context(), "SELECT coalesce(min(missing_success_threshold),2) FROM reconciliation_policies WHERE organization_id=$1 AND (connector_id IS NULL OR connector_id=$2)", org, s.ConnectorID).Scan(&missingThreshold)
+	summary, e := reconcile.ApplyPostgres(r.Context(), tx, s, missingThreshold)
+	if e != nil {
+		a.log.Warn("snapshot_reconciliation_rejected", "requestId", requestID(r), "collectorId", id, "connectorId", s.ConnectorID, "error", e)
+		writeError(w, 422, "snapshot_rejected", "snapshot observations could not be reconciled", requestID(r))
+		return
+	}
+	if _, e = tx.Exec(r.Context(), "UPDATE source_snapshots SET status='SUCCEEDED' WHERE id=$1 AND organization_id=$2", s.SnapshotID, org); e != nil {
+		writeError(w, 500, "internal_error", "snapshot status could not be finalized", requestID(r))
+		return
+	}
+	if e = audit.Append(r.Context(), tx, audit.Event{ID: newID("audit"), OrganizationID: org, ActorID: id, Action: "collector.snapshot.reconciled", ResourceType: "source_snapshot", ResourceID: s.SnapshotID, RequestID: requestID(r), Payload: map[string]any{"connectorId": s.ConnectorID, "assets": len(s.Assets), "relationships": len(s.Relationships), "summary": summary}}); e != nil {
+		writeError(w, 500, "internal_error", "snapshot audit event could not be recorded", requestID(r))
+		return
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		writeError(w, 500, "internal_error", "snapshot transaction could not be committed", requestID(r))
+		return
+	}
+	writeJSON(w, 202, map[string]any{"snapshotId": s.SnapshotID, "status": "SUCCEEDED", "summary": summary})
+}
+
+func validSnapshotContract(s domain.SnapshotEnvelope) bool {
+	if s.SnapshotID == "" || len(s.SnapshotID) > 160 || s.OrganizationID == "" || s.CollectorID == "" || s.ConnectorID == "" || s.Sequence < 1 || s.ProtocolVersion != "1.0" || len(s.Assets) > 100000 || len(s.Relationships) > 250000 || len(s.Warnings) > 1000 || len(s.Statistics) > 32 || s.StartedAt.IsZero() || s.CompletedAt.IsZero() || s.CompletedAt.Before(s.StartedAt) {
+		return false
+	}
+	for _, warning := range s.Warnings {
+		if len(warning) > 2000 {
+			return false
+		}
+	}
+	for _, count := range s.Statistics {
+		if count < 0 {
+			return false
+		}
+	}
+	seenAssets := map[string]bool{}
+	for _, observation := range s.Assets {
+		if observation.ExternalID == "" || len(observation.ExternalID) > 1024 || len(observation.AssetType) > 80 || observation.ObservedAt.IsZero() || len(observation.Attributes) > 128 || len(observation.IdentityHints) > 32 || len(observation.Fingerprint) > 128 || (observation.Status != "OBSERVED" && observation.Status != "UNKNOWN") || seenAssets[observation.ExternalID] {
+			return false
+		}
+		seenAssets[observation.ExternalID] = true
+	}
+	seenRelationships := map[string]bool{}
+	for _, relationship := range s.Relationships {
+		key := relationship.ExternalFromID + "\x00" + relationship.ExternalToID + "\x00" + relationship.Type
+		if relationship.ExternalFromID == "" || len(relationship.ExternalFromID) > 1024 || relationship.ExternalToID == "" || len(relationship.ExternalToID) > 1024 || relationship.Type == "" || len(relationship.Type) > 80 || relationship.ObservedAt.IsZero() || len(relationship.Attributes) > 64 || !seenAssets[relationship.ExternalFromID] || !seenAssets[relationship.ExternalToID] || seenRelationships[key] {
+			return false
+		}
+		seenRelationships[key] = true
+	}
+	return true
 }
 
 func decode(w http.ResponseWriter, r *http.Request, out any, max int64) error {
@@ -591,8 +762,17 @@ func decode(w http.ResponseWriter, r *http.Request, out any, max int64) error {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if e := d.Decode(out); e != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(e, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured limit", requestID(r))
+			return e
+		}
 		writeError(w, 400, "invalid_request", "request body is invalid", requestID(r))
 		return e
+	}
+	if e := d.Decode(&struct{}{}); !errors.Is(e, io.EOF) {
+		writeError(w, 400, "invalid_request", "request body must contain one JSON document", requestID(r))
+		return errors.New("multiple JSON documents")
 	}
 	return nil
 }
@@ -613,6 +793,38 @@ func newID(prefix string) string {
 func contains(v []string, s string) bool {
 	for _, x := range v {
 		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) clientIP(r *http.Request) string {
+	remote := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		remote = host
+	}
+	address, err := netip.ParseAddr(strings.Trim(remote, "[]"))
+	if err != nil || !a.trustedProxy(address) {
+		return remote
+	}
+	forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(forwarded) - 1; i >= 0; i-- {
+		candidate, parseErr := netip.ParseAddr(strings.TrimSpace(forwarded[i]))
+		if parseErr != nil {
+			continue
+		}
+		address = candidate
+		if !a.trustedProxy(candidate) {
+			break
+		}
+	}
+	return address.String()
+}
+
+func (a *App) trustedProxy(address netip.Addr) bool {
+	for _, prefix := range a.cfg.TrustedProxyCIDRs {
+		if prefix.Contains(address) {
 			return true
 		}
 	}

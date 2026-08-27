@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +23,7 @@ type Config struct {
 	MaxImportBytes, MaxSnapshotBytes                             int64
 	MaxConcurrentReconciliations                                 int
 	CollectorHeartbeatInterval                                   time.Duration
+	TrustedProxyCIDRs                                            []netip.Prefix
 }
 
 func Load() (Config, error) {
@@ -33,6 +36,13 @@ func Load() (Config, error) {
 		MaxGraphDepth: integer("INFRAGRAPH_MAX_GRAPH_DEPTH", 6), MaxGraphNodes: integer("INFRAGRAPH_MAX_GRAPH_NODES", 500), MaxImportBytes: int64(integer("INFRAGRAPH_MAX_IMPORT_BYTES", 10<<20)), MaxSnapshotBytes: int64(integer("INFRAGRAPH_MAX_SNAPSHOT_BYTES", 50<<20)), MaxConcurrentReconciliations: integer("INFRAGRAPH_MAX_CONCURRENT_RECONCILIATIONS", 4),
 		CollectorHeartbeatInterval: duration("INFRAGRAPH_COLLECTOR_HEARTBEAT_INTERVAL", 30*time.Second),
 	}
+	for _, value := range split(os.Getenv("INFRAGRAPH_TRUSTED_PROXY_CIDRS")) {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid trusted proxy CIDR %q", value)
+		}
+		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, prefix)
+	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -40,11 +50,26 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.Environment != "development" && c.Environment != "test" && c.Environment != "production" {
+		return errors.New("environment must be development, test, or production")
+	}
+	if c.DatabaseURL == "" {
+		return errors.New("database URL required")
+	}
 	if c.MaxGraphDepth < 1 || c.MaxGraphDepth > 20 || c.MaxGraphNodes < 1 || c.MaxGraphNodes > 5000 {
 		return errors.New("graph limits are outside safe bounds")
 	}
 	if c.MaxImportBytes < 1024 || c.MaxSnapshotBytes < 1024 {
 		return errors.New("payload limits are invalid")
+	}
+	if c.MaxConcurrentReconciliations < 1 || c.MaxConcurrentReconciliations > 64 {
+		return errors.New("concurrent reconciliation limit is outside safe bounds")
+	}
+	if c.ObjectStorageType != "local" && c.ObjectStorageType != "s3" {
+		return errors.New("object storage type must be local or s3")
+	}
+	if c.OTELEnabled && strings.TrimSpace(c.OTELEndpoint) == "" {
+		return errors.New("OpenTelemetry endpoint required when telemetry is enabled")
 	}
 	if c.Environment != "production" {
 		return nil
@@ -54,16 +79,29 @@ func (c Config) Validate() error {
 		problems = append(problems, "strong session secret required")
 	}
 	key, err := base64.StdEncoding.DecodeString(c.MasterKey)
-	if err != nil || len(key) != 32 {
+	allZero := len(key) == 32
+	for _, b := range key {
+		allZero = allZero && b == 0
+	}
+	if err != nil || len(key) != 32 || allZero {
 		problems = append(problems, "master key must be base64-encoded 32 bytes")
+	}
+	databaseURL, err := url.Parse(c.DatabaseURL)
+	sslMode := strings.ToLower(databaseURL.Query().Get("sslmode"))
+	if err != nil || (databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") || databaseURL.Hostname() == "" || (sslMode != "require" && sslMode != "verify-ca" && sslMode != "verify-full") {
+		problems = append(problems, "production database URL must be PostgreSQL with TLS enabled")
 	}
 	if len(c.AllowedOrigins) == 0 {
 		problems = append(problems, "allowed origins required")
 	}
 	for _, o := range c.AllowedOrigins {
-		if o == "*" || strings.HasPrefix(o, "http://") {
+		origin, parseErr := url.Parse(o)
+		if parseErr != nil || o == "*" || origin.Scheme != "https" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
 			problems = append(problems, "production origins must be explicit HTTPS origins")
 		}
+	}
+	if c.ObjectStorageType != "s3" || c.S3Endpoint == "" || c.S3Bucket == "" || c.S3AccessKey == "" || c.S3SecretKey == "" || !c.S3UseTLS {
+		problems = append(problems, "production requires complete TLS-enabled S3 object storage")
 	}
 	if c.Debug {
 		problems = append(problems, "debug must be disabled")

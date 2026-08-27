@@ -23,6 +23,13 @@ func TestPasswordAndEnvelope(t *testing.T) {
 		t.Fatal("tampering accepted")
 	}
 }
+
+func TestKeyedTokenHashIsBoundToSecretAndToken(t *testing.T) {
+	one := KeyedTokenHash("secret-one", "token")
+	if one == KeyedTokenHash("secret-two", "token") || one == KeyedTokenHash("secret-one", "other") {
+		t.Fatal("keyed token hash is not bound to both inputs")
+	}
+}
 func TestSnapshotSignatureMutation(t *testing.T) {
 	pub, priv, _ := GenerateCollectorKey()
 	s := domain.SnapshotEnvelope{ProtocolVersion: "1.0", SnapshotID: "s1", OrganizationID: "o1", CollectorID: "c1", Sequence: 1, CompletedAt: time.Now()}

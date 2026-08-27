@@ -147,6 +147,12 @@ func TokenHash(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
 }
+
+func KeyedTokenHash(secret, token string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(token))
+	return hex.EncodeToString(h.Sum(nil))
+}
 func RandomToken(bytes int) (string, error) {
 	b := make([]byte, bytes)
 	if _, e := rand.Read(b); e != nil {

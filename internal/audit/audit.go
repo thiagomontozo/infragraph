@@ -23,6 +23,9 @@ func Append(ctx context.Context, tx pgx.Tx, e Event) error {
 	if e.OccurredAt.IsZero() {
 		e.OccurredAt = time.Now().UTC()
 	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "audit|"+e.OrganizationID); err != nil {
+		return err
+	}
 	var previous string
 	err := tx.QueryRow(ctx, "SELECT event_hash FROM audit_events WHERE organization_id=$1 ORDER BY occurred_at DESC,id DESC LIMIT 1 FOR UPDATE", e.OrganizationID).Scan(&previous)
 	if err != nil && err != pgx.ErrNoRows {

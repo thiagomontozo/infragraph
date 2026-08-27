@@ -6,6 +6,7 @@ import (
 	"github.com/thiagomontozo/infragraph/internal/app"
 	"github.com/thiagomontozo/infragraph/internal/config"
 	"github.com/thiagomontozo/infragraph/internal/database"
+	"github.com/thiagomontozo/infragraph/internal/storage"
 	"log/slog"
 	"net/http"
 	"os"
@@ -35,7 +36,17 @@ func main() {
 		slog.Error("migration failed", "error", e)
 		os.Exit(1)
 	}
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: app.New(cfg, db, slog.Default()).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
+	var objects storage.ObjectStorage
+	if cfg.ObjectStorageType == "s3" {
+		objects, e = storage.NewS3(cfg.S3Endpoint, cfg.S3Bucket, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3UseTLS)
+	} else {
+		objects, e = storage.NewLocal(cfg.ObjectStoragePath)
+	}
+	if e != nil {
+		slog.Error("object storage configuration failed", "error", e)
+		os.Exit(1)
+	}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: app.New(cfg, db, slog.Default(), objects).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	stopped := make(chan os.Signal, 1)
 	signal.Notify(stopped, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
