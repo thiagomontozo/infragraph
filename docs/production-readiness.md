@@ -80,7 +80,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 
 ### Governance and release gates
 
-50. [ ] Main branch rules require CI, CodeQL, and Security with review/no force-push policy.
+50. [x] Main branch rules require CI, CodeQL, and Security with review/no force-push policy; enforcement includes administrators and last-push approval.
 51. [ ] All workflows for the exact release commit complete successfully on GitHub.
 52. [ ] Known limitations, runbooks, incident contacts, and upgrade notes are approved by the operator.
 53. [ ] Signed `v1.0.0` tag/release is created only after gates 1–52 have recorded evidence.
@@ -88,8 +88,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 ## Current blockers to `1.0.0`
 
 - Gates 48–49 need target-environment recovery objectives and capacity budgets from the operator; the repository cannot invent these acceptance thresholds.
-- Gate 50 requires repository ruleset/branch-protection administration and confirmation that required checks are enforced.
-- The current UI is an operational read/preview surface. Administrative workflows such as user/MFA lifecycle, connector/policy management, import apply, export generation, and merge review are not complete. Either implement and test them before calling the broad product scope 1.0, or explicitly approve a narrower read-only collector/inventory production scope.
+- The version 1.0 scope decision is complete: [ADR 021](adr/021-v1-read-only-product-scope.md) approves the narrower read-only inventory product. Administrative workflows are explicitly post-1.0 and the UI exposes no placeholder routes for them.
 - Kubernetes discovery has a tested connector library but is not yet wired into the shipped collector executable. Docker discovery is the only executable collector path in this release candidate.
 - Multi-replica API remains unsupported because admission/rate limiting is process-local. Use one API replica until shared coordination is implemented and tested.
 
