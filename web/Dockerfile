@@ -11,7 +11,7 @@ FROM deps AS build
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.4-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.31.4-alpine3.24
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 USER 101:101
