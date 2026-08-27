@@ -104,7 +104,7 @@ type item struct {
 	}
 	Spec struct {
 		NodeName, ServiceName, VolumeName string
-		Selector                          map[string]string
+		Selector                          json.RawMessage
 		DefaultBackend                    backend
 		Rules                             []struct {
 			HTTP struct {
@@ -197,8 +197,9 @@ func (c *Connector) Discover(ctx context.Context) ([]domain.Observation, []domai
 		if value.item.Spec.NodeName != "" {
 			attributes["nodeName"] = value.item.Spec.NodeName
 		}
-		if len(value.item.Spec.Selector) > 0 {
-			attributes["selector"] = value.item.Spec.Selector
+		selector := selectorLabels(value.item.Spec.Selector)
+		if len(selector) > 0 {
+			attributes["selector"] = selector
 		}
 		if value.item.Spec.ServiceName != "" {
 			attributes["serviceName"] = value.item.Spec.ServiceName
@@ -246,9 +247,10 @@ func (c *Connector) Discover(ctx context.Context) ([]domain.Observation, []domai
 				relationships = append(relationships, relation(metadata.UID, volumeID, "BOUND_TO", now))
 			}
 		}
-		if value.resource.kind == "Service" && len(value.item.Spec.Selector) > 0 {
+		selector := selectorLabels(value.item.Spec.Selector)
+		if value.resource.kind == "Service" && len(selector) > 0 {
 			for _, pod := range pods {
-				if pod.item.Metadata.Namespace == metadata.Namespace && labelsMatch(value.item.Spec.Selector, pod.item.Metadata.Labels) {
+				if pod.item.Metadata.Namespace == metadata.Namespace && labelsMatch(selector, pod.item.Metadata.Labels) {
 					relationships = append(relationships, relation(metadata.UID, pod.item.Metadata.UID, "ROUTES_TO", now))
 				}
 			}
@@ -323,6 +325,23 @@ func labelsMatch(selector, labels map[string]string) bool {
 		}
 	}
 	return len(selector) > 0
+}
+
+func selectorLabels(raw json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	direct := map[string]string{}
+	if err := json.Unmarshal(raw, &direct); err == nil {
+		return direct
+	}
+	structured := struct {
+		MatchLabels map[string]string `json:"matchLabels"`
+	}{}
+	if err := json.Unmarshal(raw, &structured); err == nil {
+		return structured.MatchLabels
+	}
+	return nil
 }
 
 func ingressServices(value item) []string {

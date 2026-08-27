@@ -16,7 +16,7 @@ func TestMetadataPaginationAndRelationships(t *testing.T) {
 		"/api/v1/nodes":                        `{"items":[{"metadata":{"name":"worker-1","uid":"node-uid"}}]}`,
 		"/api/v1/pods":                         `{"items":[{"metadata":{"name":"api-1","namespace":"apps","uid":"pod-uid","labels":{"app":"api"},"ownerReferences":[{"kind":"ReplicaSet","name":"api-rs","uid":"rs-uid"}]},"spec":{"nodeName":"worker-1"},"data":{"password":"must-not-appear"}}]}`,
 		"/api/v1/services":                     `{"items":[{"metadata":{"name":"api","namespace":"apps","uid":"service-uid"},"spec":{"selector":{"app":"api"}}}]}`,
-		"/apis/apps/v1/deployments":            `{"items":[{"metadata":{"name":"api","namespace":"apps","uid":"deployment-uid"}}]}`,
+		"/apis/apps/v1/deployments":            `{"items":[{"metadata":{"name":"api","namespace":"apps","uid":"deployment-uid"},"spec":{"selector":{"matchLabels":{"app":"api"}}}}]}`,
 		"/apis/apps/v1/statefulsets":           `{"items":[]}`,
 		"/apis/apps/v1/daemonsets":             `{"items":[]}`,
 		"/apis/apps/v1/replicasets":            `{"items":[{"metadata":{"name":"api-rs","namespace":"apps","uid":"rs-uid","ownerReferences":[{"kind":"Deployment","name":"api","uid":"deployment-uid"}]}}]}`,
