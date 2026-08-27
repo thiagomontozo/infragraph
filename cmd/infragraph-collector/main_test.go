@@ -50,6 +50,20 @@ func TestConfiguredConnectorType(t *testing.T) {
 	}
 }
 
+func TestEnvIntRejectsInvalidAndOverflowingValues(t *testing.T) {
+	const key = "INFRAGRAPH_TEST_POSITIVE_INT"
+	for _, value := range []string{"", "0", "-1", "999999999999999999999999999999"} {
+		t.Setenv(key, value)
+		if got := envInt(key, 42); got != 42 {
+			t.Fatalf("envInt(%q)=%d, want fallback", value, got)
+		}
+	}
+	t.Setenv(key, "750")
+	if got := envInt(key, 42); got != 750 {
+		t.Fatalf("envInt returned %d, want 750", got)
+	}
+}
+
 func TestSequenceAndSpoolAreDurable(t *testing.T) {
 	data := t.TempDir()
 	first, err := nextSequence(data)

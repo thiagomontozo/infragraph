@@ -209,8 +209,8 @@ func discover(ctx context.Context, connectorType string) ([]domain.Observation, 
 			ClusterID:    os.Getenv("INFRAGRAPH_KUBERNETES_CLUSTER_ID"),
 			ClusterName:  os.Getenv("INFRAGRAPH_KUBERNETES_CLUSTER_NAME"),
 			Timeout:      envDuration("INFRAGRAPH_KUBERNETES_TIMEOUT", 30*time.Second),
-			PageSize:     int(envInt64("INFRAGRAPH_KUBERNETES_PAGE_SIZE", 500)),
-			MaxResources: int(envInt64("INFRAGRAPH_KUBERNETES_MAX_RESOURCES", 100000)),
+			PageSize:     envInt("INFRAGRAPH_KUBERNETES_PAGE_SIZE", 500),
+			MaxResources: envInt("INFRAGRAPH_KUBERNETES_MAX_RESOURCES", 100000),
 		})
 		if err != nil {
 			return nil, nil, err
@@ -389,6 +389,14 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 
 func envInt64(key string, fallback int64) int64 {
 	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envInt(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
 	if err != nil || value <= 0 {
 		return fallback
 	}
