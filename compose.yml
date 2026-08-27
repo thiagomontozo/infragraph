@@ -61,6 +61,7 @@ services:
     labels: {com.infragraph.managed: "true", com.infragraph.purpose: "development"}
     environment:
       INFRAGRAPH_CONTROL_PLANE_URL: http://api:8080
+      INFRAGRAPH_CONNECTOR_TYPE: DOCKER
       INFRAGRAPH_DOCKER_SOCKET: /var/run/docker.sock
       INFRAGRAPH_DOCKER_LABEL_SCOPE: com.infragraph.test=true
     volumes: [/var/run/docker.sock:/var/run/docker.sock, infragraph-collector:/data/collector]
