@@ -80,6 +80,8 @@ Graph requests are organization-scoped, time-bounded, cycle-safe, and capped by 
 
 Protocol 1.0 uses outbound HTTPS. Enrollment tokens are short-lived, single-use, hash-at-rest, and organization scoped. A collector generates an Ed25519 key pair; its private key never leaves the collector. Snapshot ingest checks credential binding, revocation, signature, timestamp, sequence, size, and idempotency. The collector has no arbitrary command execution. See [collector protocol](docs/collector-protocol.md).
 
+The executable collector supports one explicitly enrolled Docker or Kubernetes connector per identity. Kubernetes runs in-cluster with list-only allowlisted RBAC, projected token/CA files, bounded pagination, and metadata-only collection. See [Kubernetes connector](docs/kubernetes-connector.md) and the [hardened deployment example](deploy/kubernetes-collector.example.yaml).
+
 ## Quick start
 
 Prerequisites are Docker 24+ and Docker Compose v2. Development credentials in `compose.yml` are intentionally non-production.

@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: infragraph-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infragraph-e2e
+  namespace: infragraph-e2e
+  labels:
+    infragraph.dev/e2e: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infragraph-e2e
+  template:
+    metadata:
+      labels:
+        app: infragraph-e2e
+        infragraph.dev/e2e: "true"
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10.1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infragraph-e2e
+  namespace: infragraph-e2e
+  labels:
+    infragraph.dev/e2e: "true"
+spec:
+  selector:
+    app: infragraph-e2e
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: excluded-secret
+  namespace: infragraph-e2e
+stringData:
+  marker: infragraph-secret-must-not-leak

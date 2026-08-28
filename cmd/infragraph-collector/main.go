@@ -23,6 +23,7 @@ import (
 	"time"
 
 	dockerconnector "github.com/thiagomontozo/infragraph/internal/connectors/docker"
+	kubernetesconnector "github.com/thiagomontozo/infragraph/internal/connectors/kubernetes"
 	"github.com/thiagomontozo/infragraph/internal/domain"
 	"github.com/thiagomontozo/infragraph/internal/security"
 )
@@ -35,13 +36,19 @@ type identity struct {
 	OrganizationID string `json:"organizationId"`
 	Credential     string `json:"credential"`
 	PrivateKey     string `json:"privateKey"`
+	ConnectorType  string `json:"connectorType"`
 }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	control := strings.TrimRight(os.Getenv("INFRAGRAPH_CONTROL_PLANE_URL"), "/")
-	id, err := loadOrEnroll(ctx, control, env("INFRAGRAPH_COLLECTOR_DATA_DIR", "./data/collector"))
+	connectorType, err := configuredConnectorType()
+	if err != nil {
+		slog.Error("collector configuration failed", "error", err)
+		os.Exit(1)
+	}
+	id, err := loadOrEnroll(ctx, control, env("INFRAGRAPH_COLLECTOR_DATA_DIR", "./data/collector"), connectorType)
 	if err != nil {
 		slog.Error("collector enrollment failed", "error", err)
 		os.Exit(1)
@@ -72,7 +79,7 @@ func main() {
 	}
 }
 
-func loadOrEnroll(ctx context.Context, control, data string) (identity, error) {
+func loadOrEnroll(ctx context.Context, control, data, connectorType string) (identity, error) {
 	if control == "" {
 		return identity{}, errors.New("INFRAGRAPH_CONTROL_PLANE_URL required")
 	}
@@ -88,6 +95,12 @@ func loadOrEnroll(ctx context.Context, control, data string) (identity, error) {
 		if id.CollectorID == "" || id.OrganizationID == "" || id.Credential == "" || id.PrivateKey == "" {
 			return identity{}, errors.New("collector identity file is incomplete")
 		}
+		if id.ConnectorType == "" {
+			id.ConnectorType = "DOCKER"
+		}
+		if id.ConnectorType != connectorType {
+			return identity{}, fmt.Errorf("configured connector type %s does not match enrolled identity type %s; use a separate data directory and enrollment", connectorType, id.ConnectorType)
+		}
 		return id, nil
 	}
 	token := os.Getenv("INFRAGRAPH_ENROLLMENT_TOKEN")
@@ -98,7 +111,11 @@ func loadOrEnroll(ctx context.Context, control, data string) (identity, error) {
 	if err != nil {
 		return identity{}, err
 	}
-	body := map[string]string{"token": token, "name": env("INFRAGRAPH_COLLECTOR_NAME", "collector"), "publicKey": base64.StdEncoding.EncodeToString(publicKey), "collectorVersion": version, "protocolVersion": "1.0", "connectorName": env("INFRAGRAPH_CONNECTOR_NAME", "Docker discovery"), "connectorType": "DOCKER"}
+	defaultConnectorName := "Docker discovery"
+	if connectorType == "KUBERNETES" {
+		defaultConnectorName = "Kubernetes discovery"
+	}
+	body := map[string]string{"token": token, "name": env("INFRAGRAPH_COLLECTOR_NAME", "collector"), "publicKey": base64.StdEncoding.EncodeToString(publicKey), "collectorVersion": version, "protocolVersion": "1.0", "connectorName": env("INFRAGRAPH_CONNECTOR_NAME", defaultConnectorName), "connectorType": connectorType}
 	var enrolled struct {
 		CollectorID    string `json:"collectorId"`
 		ConnectorID    string `json:"connectorId"`
@@ -108,7 +125,7 @@ func loadOrEnroll(ctx context.Context, control, data string) (identity, error) {
 	if err = post(ctx, control+"/collector/v1/enroll", "", body, &enrolled, 1<<20); err != nil {
 		return identity{}, err
 	}
-	id := identity{CollectorID: enrolled.CollectorID, ConnectorID: enrolled.ConnectorID, OrganizationID: enrolled.OrganizationID, Credential: enrolled.Credential, PrivateKey: base64.StdEncoding.EncodeToString(privateKey)}
+	id := identity{CollectorID: enrolled.CollectorID, ConnectorID: enrolled.ConnectorID, OrganizationID: enrolled.OrganizationID, Credential: enrolled.Credential, PrivateKey: base64.StdEncoding.EncodeToString(privateKey), ConnectorType: connectorType}
 	raw, _ := json.Marshal(id)
 	if err = os.WriteFile(identityPath, raw, 0600); err != nil {
 		return identity{}, err
@@ -117,11 +134,8 @@ func loadOrEnroll(ctx context.Context, control, data string) (identity, error) {
 }
 
 func runOnce(ctx context.Context, control string, id identity, data string) error {
-	connector, err := dockerconnector.NewUnix(env("INFRAGRAPH_DOCKER_SOCKET", "/var/run/docker.sock"), env("INFRAGRAPH_DOCKER_LABEL_SCOPE", "com.infragraph.test=true"), 15*time.Second)
-	if err != nil {
-		return err
-	}
-	assets, relationships, err := connector.Discover(ctx)
+	startedAt := time.Now().UTC()
+	assets, relationships, err := discover(ctx, id.ConnectorType)
 	if err != nil {
 		return err
 	}
@@ -156,7 +170,7 @@ func runOnce(ctx context.Context, control string, id identity, data string) erro
 	if connectorID == "" {
 		return errors.New("collector identity does not contain a connector ID; re-enroll this pre-1.0 identity")
 	}
-	snapshot := domain.SnapshotEnvelope{ProtocolVersion: "1.0", SnapshotID: "snapshot-" + strconv.FormatInt(sequence, 10), OrganizationID: id.OrganizationID, CollectorID: id.CollectorID, ConnectorID: connectorID, ConnectorType: "DOCKER", ConnectorVersion: version, StartedAt: time.Now().Add(-time.Second).UTC(), CompletedAt: time.Now().UTC(), Sequence: sequence, Assets: assets, Relationships: relationships, Warnings: []string{}, Statistics: map[string]int{"assets": len(assets), "relationships": len(relationships)}}
+	snapshot := domain.SnapshotEnvelope{ProtocolVersion: "1.0", SnapshotID: "snapshot-" + strconv.FormatInt(sequence, 10), OrganizationID: id.OrganizationID, CollectorID: id.CollectorID, ConnectorID: connectorID, ConnectorType: id.ConnectorType, ConnectorVersion: version, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Sequence: sequence, Assets: assets, Relationships: relationships, Warnings: []string{}, Statistics: map[string]int{"assets": len(assets), "relationships": len(relationships)}}
 	key, err := base64.StdEncoding.DecodeString(id.PrivateKey)
 	if err != nil {
 		return err
@@ -171,8 +185,44 @@ func runOnce(ctx context.Context, control string, id identity, data string) erro
 	return flushSpool(ctx, control, id, data)
 }
 
+func discover(ctx context.Context, connectorType string) ([]domain.Observation, []domain.RelationshipObservation, error) {
+	switch connectorType {
+	case "DOCKER":
+		connector, err := dockerconnector.NewUnix(env("INFRAGRAPH_DOCKER_SOCKET", "/var/run/docker.sock"), env("INFRAGRAPH_DOCKER_LABEL_SCOPE", "com.infragraph.test=true"), 15*time.Second)
+		if err != nil {
+			return nil, nil, err
+		}
+		return connector.Discover(ctx)
+	case "KUBERNETES":
+		token, err := readBoundedFile(env("INFRAGRAPH_KUBERNETES_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token"), 1<<20)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read Kubernetes token: %w", err)
+		}
+		ca, err := readBoundedFile(env("INFRAGRAPH_KUBERNETES_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"), 1<<20)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read Kubernetes CA: %w", err)
+		}
+		connector, err := kubernetesconnector.NewWithConfig(kubernetesconnector.Config{
+			BaseURL:      env("INFRAGRAPH_KUBERNETES_API_URL", "https://kubernetes.default.svc"),
+			Token:        string(token),
+			CAPEM:        ca,
+			ClusterID:    os.Getenv("INFRAGRAPH_KUBERNETES_CLUSTER_ID"),
+			ClusterName:  os.Getenv("INFRAGRAPH_KUBERNETES_CLUSTER_NAME"),
+			Timeout:      envDuration("INFRAGRAPH_KUBERNETES_TIMEOUT", 30*time.Second),
+			PageSize:     envInt("INFRAGRAPH_KUBERNETES_PAGE_SIZE", 500),
+			MaxResources: envInt("INFRAGRAPH_KUBERNETES_MAX_RESOURCES", 100000),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return connector.Discover(ctx)
+	default:
+		return nil, nil, fmt.Errorf("unsupported connector type %q", connectorType)
+	}
+}
+
 func heartbeat(ctx context.Context, control string, id identity, health string) error {
-	body := map[string]any{"collectorVersion": version, "protocolVersion": "1.0", "os": runtime.GOOS, "architecture": runtime.GOARCH, "capabilities": []string{"DISCOVER_ASSETS", "DISCOVER_RELATIONSHIPS", "DISCOVER_NETWORKS", "DISCOVER_STORAGE", "DISCOVER_METADATA"}, "runningJobs": 0, "healthSummary": health}
+	body := map[string]any{"collectorVersion": version, "protocolVersion": "1.0", "os": runtime.GOOS, "architecture": runtime.GOARCH, "capabilities": []string{"DISCOVER_ASSETS", "DISCOVER_RELATIONSHIPS", "DISCOVER_SERVICES", "DISCOVER_NETWORKS", "DISCOVER_STORAGE", "DISCOVER_METADATA"}, "runningJobs": 0, "healthSummary": health}
 	return post(ctx, control+"/collector/v1/heartbeat", id.Credential, body, nil, 1<<20)
 }
 
@@ -310,8 +360,43 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+func configuredConnectorType() (string, error) {
+	connectorType := strings.ToUpper(strings.TrimSpace(env("INFRAGRAPH_CONNECTOR_TYPE", "DOCKER")))
+	if connectorType != "DOCKER" && connectorType != "KUBERNETES" {
+		return "", fmt.Errorf("INFRAGRAPH_CONNECTOR_TYPE must be DOCKER or KUBERNETES, got %q", connectorType)
+	}
+	return connectorType, nil
+}
+
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("file exceeds %d bytes", maxBytes)
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, errors.New("file is empty")
+	}
+	return raw, nil
+}
+
 func envInt64(key string, fallback int64) int64 {
 	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envInt(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
 	if err != nil || value <= 0 {
 		return fallback
 	}

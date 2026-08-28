@@ -11,6 +11,7 @@ All notable changes are documented here using [Keep a Changelog](https://keepach
 - Collector heartbeats, collector-bound connector enrollment, durable monotonic sequences, and a bounded retry spool.
 - Integration coverage for signed ingest, retry idempotency, cross-source identity/conflicts, absence handling, and PostgreSQL graph traversal.
 - ADR 021 and a normative version 1.0 product-scope document defining the supported read-only inventory surface.
+- Executable Kubernetes collector discovery with stable cluster identity, bounded pagination, metadata-only assets, topology relationships, hardened in-cluster deployment, and a real `kind` E2E.
 
 ### Changed
 
@@ -20,6 +21,7 @@ All notable changes are documented here using [Keep a Changelog](https://keepach
 - Readiness now includes object-storage availability, and audit-chain appends serialize per organization.
 - Release documentation now contains the explicit 53-gate matrix and precise remaining production blockers.
 - The web navigation and Asset 360 tabs now expose only implemented API-backed views; unsupported administrative placeholders, fake source claims, and inactive mutation buttons were removed.
+- Collector identities are now bound to an explicit `DOCKER` or `KUBERNETES` type; Kubernetes uses direct TLS, projected token/CA files, and list-only allowlisted RBAC.
 
 [Unreleased]: https://github.com/thiagomontozo/infragraph/compare/v1.0.0-rc.1...HEAD
 

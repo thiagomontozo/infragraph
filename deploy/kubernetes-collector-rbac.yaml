@@ -12,13 +12,13 @@ metadata: {name: infragraph-collector-readonly}
 rules:
   - apiGroups: [""]
     resources: ["namespaces", "nodes", "pods", "services", "persistentvolumes", "persistentvolumeclaims"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
