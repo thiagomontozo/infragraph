@@ -2,6 +2,7 @@ name: CI
 on:
   push: {branches: [main]}
   pull_request: {branches: [main]}
+  workflow_dispatch:
   workflow_call:
 permissions: {contents: read}
 concurrency: {group: "ci-${{ github.ref }}", cancel-in-progress: true}
@@ -81,6 +82,14 @@ jobs:
       - uses: actions/setup-go@v6
         with: {go-version-file: go.mod, cache: true}
       - run: chmod +x scripts/e2e.sh && scripts/e2e.sh
+  kubernetes-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with: {go-version-file: go.mod, cache: true}
+      - run: chmod +x scripts/kubernetes-e2e.sh && scripts/kubernetes-e2e.sh
   playwright:
     runs-on: ubuntu-latest
     timeout-minutes: 20

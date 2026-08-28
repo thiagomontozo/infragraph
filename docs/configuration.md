@@ -24,5 +24,5 @@
 
 Production validation also requires PostgreSQL TLS (`sslmode` must not be `disable`), complete TLS-enabled S3 settings, a non-zero random master key, safe reconciliation concurrency (1–64), and syntactically valid trusted proxy CIDRs. `INFRAGRAPH_TRUSTED_PROXY_CIDRS` is a comma-separated allowlist; forwarded client addresses are ignored unless the direct peer belongs to it.
 
-Collector-only variables include `INFRAGRAPH_CONTROL_PLANE_URL`, the one-use `INFRAGRAPH_ENROLLMENT_TOKEN`, `INFRAGRAPH_COLLECTOR_DATA_DIR`, `INFRAGRAPH_COLLECTOR_NAME`, `INFRAGRAPH_CONNECTOR_NAME`, `INFRAGRAPH_DOCKER_SOCKET`, `INFRAGRAPH_DOCKER_LABEL_SCOPE`, `INFRAGRAPH_COLLECTOR_INTERVAL`, `INFRAGRAPH_COLLECTOR_MAX_SPOOL_BYTES`, and `INFRAGRAPH_COLLECTOR_MAX_SPOOL_AGE`.
+Collector-only variables include `INFRAGRAPH_CONTROL_PLANE_URL`, the one-use `INFRAGRAPH_ENROLLMENT_TOKEN`, `INFRAGRAPH_COLLECTOR_DATA_DIR`, `INFRAGRAPH_COLLECTOR_NAME`, `INFRAGRAPH_CONNECTOR_NAME`, `INFRAGRAPH_CONNECTOR_TYPE`, `INFRAGRAPH_COLLECTOR_INTERVAL`, `INFRAGRAPH_COLLECTOR_MAX_SPOOL_BYTES`, and `INFRAGRAPH_COLLECTOR_MAX_SPOOL_AGE`. Docker uses `INFRAGRAPH_DOCKER_SOCKET` and `INFRAGRAPH_DOCKER_LABEL_SCOPE`. Kubernetes uses the API URL, token/CA file, cluster identity/name, timeout, page size, and resource cap documented in [Kubernetes connector](kubernetes-connector.md).
 

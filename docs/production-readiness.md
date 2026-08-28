@@ -9,6 +9,7 @@ InfraGraph remains **Production Candidate (`1.0.0-rc.1`)**. The supported candid
 - Graph traversal runs as bounded indexed PostgreSQL breadth-first queries instead of loading the tenant's full edge set into API memory.
 - Session and CSRF token hashes are keyed by the external session secret. Forwarded client addresses are trusted only from configured CIDRs, rate-limit state is pruned, and production configuration rejects non-TLS PostgreSQL, local/non-TLS object storage, invalid origins, zero master keys, and unsafe concurrency.
 - Readiness checks PostgreSQL and object storage. Audit appends serialize per organization. Integration tests exercise migrations, storage, collector enrollment, signed ingest, persistence, cross-source strong identity, conflict detection, absence handling, idempotency, and bounded graph traversal.
+- The shipped collector selects Docker or Kubernetes before enrollment. Kubernetes discovery uses token/CA files, direct TLS, bounded pagination, list-only RBAC, metadata projection, relationship construction, and a real `kind` E2E with Secret-exclusion assertions.
 
 ## Release gate matrix (53 gates)
 
@@ -39,7 +40,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 18. [ ] Successful-absence and failed-collection missing-state invariants pass.
 19. [ ] PostgreSQL tenant-isolation integration passes.
 20. [ ] S3-compatible object-storage integration passes.
-21. [ ] Synthetic labeled Docker discovery E2E passes.
+21. [ ] Synthetic labeled Docker and real `kind` Kubernetes discovery E2E pass.
 22. [ ] Playwright browser smoke passes.
 23. [ ] Backup and restore test passes against the release schema.
 24. [ ] Bounded performance smoke passes with recorded inputs/results.
@@ -80,7 +81,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 
 ### Governance and release gates
 
-50. [ ] Main branch rules require CI, CodeQL, and Security with review/no force-push policy.
+50. [x] Main branch rules require CI, CodeQL, and Security with review/no force-push policy; enforcement includes administrators and last-push approval.
 51. [ ] All workflows for the exact release commit complete successfully on GitHub.
 52. [ ] Known limitations, runbooks, incident contacts, and upgrade notes are approved by the operator.
 53. [ ] Signed `v1.0.0` tag/release is created only after gates 1–52 have recorded evidence.
@@ -88,9 +89,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 ## Current blockers to `1.0.0`
 
 - Gates 48–49 need target-environment recovery objectives and capacity budgets from the operator; the repository cannot invent these acceptance thresholds.
-- Gate 50 requires repository ruleset/branch-protection administration and confirmation that required checks are enforced.
-- The current UI is an operational read/preview surface. Administrative workflows such as user/MFA lifecycle, connector/policy management, import apply, export generation, and merge review are not complete. Either implement and test them before calling the broad product scope 1.0, or explicitly approve a narrower read-only collector/inventory production scope.
-- Kubernetes discovery has a tested connector library but is not yet wired into the shipped collector executable. Docker discovery is the only executable collector path in this release candidate.
+- The version 1.0 scope decision is complete: [ADR 021](adr/021-v1-read-only-product-scope.md) approves the narrower read-only inventory product. Administrative workflows are explicitly post-1.0 and the UI exposes no placeholder routes for them.
 - Multi-replica API remains unsupported because admission/rate limiting is process-local. Use one API replica until shared coordination is implemented and tested.
 
 Do not change `VERSION` or create a `v1.0.0` tag while any blocker above remains unresolved.

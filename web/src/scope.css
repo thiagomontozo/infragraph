@@ -1,0 +1,21 @@
+.scope-label {
+  background: #eef2ff;
+  border-radius: 999px;
+  color: #3730a3;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.4rem 0.7rem;
+}
+
+.callout.scope {
+  background: #eef6ff;
+  border: 1px solid #c9def7;
+  color: #194478;
+  margin: 0 0 1rem;
+}
+
+@media (max-width: 620px) {
+  .scope-label {
+    display: none;
+  }
+}

@@ -34,7 +34,7 @@ InfraGraph answers evidence-oriented questions: what exists now, which sources o
 - Source identities, attribute claims, freshness, identifier strength, conflicts, and explanations.
 - Bounded dependency traversal, impact analysis, cycle protection, and accessible relationship tables.
 - Separate outbound collector, Ed25519-signed snapshots, replay protection, and read-only Docker/Kubernetes discovery.
-- CSV/JSON preview, allowlisted Terraform-state extraction, and a scoped NetScope ingestion contract.
+- CSV/JSON preview, allowlisted Terraform-state extraction, and a scoped NetScope ingestion contract; previews never apply changes in version 1.0.
 - PostgreSQL tenant boundary, server-side sessions, Argon2id, TOTP, CSRF, RBAC, AES-256-GCM envelopes, and tamper-evident audit chaining.
 - Local/S3-compatible object storage, migration locking, scheduler leases, Prometheus metrics, health endpoints, and hardened containers.
 
@@ -72,11 +72,15 @@ Authority is configured per connector, asset type, attribute, or relationship ty
 
 ## Living inventory and graph
 
-Asset 360 exposes Overview, Attributes, Relationships, Dependencies, Dependents, Sources, Changes, Findings, Evidence, and Timeline. Graph requests are organization-scoped, time-bounded, cycle-safe, and capped by depth and node count. The UI loads a progressive subgraph and always offers a table/list alternative.
+The version 1.0 web product is an explicitly read-only inventory and inspection surface. Asset 360 exposes effective-state overview and bounded relationship/dependency views. Operational pages inspect changes, findings, connectors, collectors, and audit records; imports validate and preview without apply. User/MFA administration, connector/policy mutation, exports, and merge review are post-1.0 work, not placeholder features. See [product scope](docs/product-scope.md) and [ADR 021](docs/adr/021-v1-read-only-product-scope.md).
+
+Graph requests are organization-scoped, time-bounded, cycle-safe, and capped by depth and node count. The UI loads a progressive subgraph and always offers a table/list alternative.
 
 ## Collectors
 
 Protocol 1.0 uses outbound HTTPS. Enrollment tokens are short-lived, single-use, hash-at-rest, and organization scoped. A collector generates an Ed25519 key pair; its private key never leaves the collector. Snapshot ingest checks credential binding, revocation, signature, timestamp, sequence, size, and idempotency. The collector has no arbitrary command execution. See [collector protocol](docs/collector-protocol.md).
+
+The executable collector supports one explicitly enrolled Docker or Kubernetes connector per identity. Kubernetes runs in-cluster with list-only allowlisted RBAC, projected token/CA files, bounded pagination, and metadata-only collection. See [Kubernetes connector](docs/kubernetes-connector.md) and the [hardened deployment example](deploy/kubernetes-collector.example.yaml).
 
 ## Quick start
 
@@ -110,7 +114,7 @@ The suite covers domain invariants, graph bounds/cycles, signatures, reconciliat
 
 ## Current status
 
-**Production Candidate — 1.0.0-rc.1.** Production Ready is declared only after every item in the [53-gate production-readiness matrix](docs/production-readiness.md) has recorded evidence. The current blockers and supported single-API topology are documented explicitly rather than hidden.
+**Production Candidate — 1.0.0-rc.1.** The version 1.0 [read-only product boundary](docs/product-scope.md) is accepted and reflected in the UI. Production Ready is declared only after every item in the [53-gate production-readiness matrix](docs/production-readiness.md) has recorded evidence. The current operational blockers and supported single-API topology are documented explicitly rather than hidden.
 
 ## Limitations and roadmap
 
