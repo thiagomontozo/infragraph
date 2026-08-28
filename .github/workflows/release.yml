@@ -43,6 +43,6 @@ jobs:
         with: {subject-name: "ghcr.io/thiagomontozo/infragraph-${{ matrix.image }}", subject-digest: "${{ steps.build.outputs.digest }}", push-to-registry: true}
       - name: Checksums
         run: sha256sum "infragraph-${{ matrix.image }}.spdx.json" > "infragraph-${{ matrix.image }}.checksums.txt"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with: {tag_name: "${{ inputs.tag || github.ref_name }}", generate_release_notes: true, files: "infragraph-${{ matrix.image }}.*"}
 
