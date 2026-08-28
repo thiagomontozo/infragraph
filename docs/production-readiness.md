@@ -81,7 +81,7 @@ The release owner records a link or artifact for every gate. “Not run” is no
 
 ### Governance and release gates
 
-50. [x] Main branch rules require CI, CodeQL, and Security with review/no force-push policy; enforcement includes administrators and last-push approval.
+50. [x] Main branch rules require CI, CodeQL, and Security with review/no force-push policy; enforcement includes administrators and last-push approval. Owner-authored merges use the documented, automatically restored [single-maintainer exception](sole-maintainer-merge.md).
 51. [ ] All workflows for the exact release commit complete successfully on GitHub.
 52. [ ] Known limitations, runbooks, incident contacts, and upgrade notes are approved by the operator.
 53. [ ] Signed `v1.0.0` tag/release is created only after gates 1–52 have recorded evidence.

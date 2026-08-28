@@ -110,7 +110,7 @@ InfraGraph minimizes collected data: Docker environment variables/logs/secrets, 
 
 ## Testing and CI/CD
 
-The suite covers domain invariants, graph bounds/cycles, signatures, reconciliation idempotency, parser limits, Terraform minimization, PostgreSQL migrations/isolation, MinIO, labeled synthetic Docker discovery, React Testing Library, Playwright, recovery, and bounded performance. CI additionally runs race detection, `govulncheck`, npm audit, CodeQL, Trivy, Scorecard, SBOM, provenance, and release signing workflows.
+The suite covers domain invariants, graph bounds/cycles, signatures, reconciliation idempotency, parser limits, Terraform minimization, PostgreSQL migrations/isolation, MinIO, labeled synthetic Docker discovery, React Testing Library, Playwright, recovery, and bounded performance. CI additionally runs race detection, `govulncheck`, npm audit, CodeQL, Trivy, Scorecard, SBOM, provenance, and release signing workflows. Owner-authored merges follow the auditable [sole-maintainer protected merge](docs/sole-maintainer-merge.md) procedure.
 
 ## Current status
 
