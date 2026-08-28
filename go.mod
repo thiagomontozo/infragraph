@@ -3,7 +3,7 @@ module github.com/thiagomontozo/infragraph
 go 1.26.6
 
 require (
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.0.95
 	golang.org/x/crypto v0.51.0
 )
