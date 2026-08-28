@@ -32,7 +32,7 @@ jobs:
           done
           docker logs infragraph-ci-minio
           exit 1
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: {go-version-file: go.mod, cache: true}
       - name: Format
         run: test -z "$(gofmt -l ./cmd ./internal)"
@@ -79,7 +79,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: {go-version-file: go.mod, cache: true}
       - run: chmod +x scripts/e2e.sh && scripts/e2e.sh
   kubernetes-discovery:
@@ -87,7 +87,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: {go-version-file: go.mod, cache: true}
       - run: chmod +x scripts/kubernetes-e2e.sh && scripts/kubernetes-e2e.sh
   playwright:
