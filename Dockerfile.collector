@@ -1,4 +1,4 @@
-FROM golang:1.26.6-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN --mount=type=secret,id=build_ca,required=false sh -c 'if [ -f /run/secrets/build_ca ]; then export SSL_CERT_FILE=/run/secrets/build_ca; fi; go mod download'
