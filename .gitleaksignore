@@ -1,0 +1,2 @@
+# RFC 6238 test vector; this is public test data, not a credential.
+19513ac511488f52858faf22168b57c842610e04:internal/security/security_test.go:generic-api-key:46
