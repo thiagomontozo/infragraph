@@ -1,0 +1,5 @@
+title = "infragraph Gitleaks configuration"
+
+[allowlist]
+description = "RFC 6238 public TOTP test vector"
+regexes = ['''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''']
