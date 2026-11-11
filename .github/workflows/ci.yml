@@ -66,7 +66,7 @@ jobs:
     defaults: {run: {working-directory: web}}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: {node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json}
       - run: npm ci
       - run: npm run lint
@@ -96,7 +96,7 @@ jobs:
     defaults: {run: {working-directory: web}}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: {node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json}
       - run: npm ci
       - run: npx playwright install --with-deps chromium
