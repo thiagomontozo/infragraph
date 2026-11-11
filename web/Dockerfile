@@ -1,4 +1,4 @@
-FROM node:22.22.3-alpine3.22 AS deps
+FROM node:26.3.0-alpine3.22 AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=secret,id=npm_ca,required=false sh -c 'if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; npm ci'
